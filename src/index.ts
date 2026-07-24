@@ -20,7 +20,12 @@ import {
   updateNote,
 } from "./notes";
 import { consumeIndexQueue, retryPendingIndexes } from "./queue";
-import { lexicalSearch, searchIndexStatus, semanticSearch } from "./search";
+import {
+  lexicalSearch,
+  migrateRerankerDiagnostic,
+  searchIndexStatus,
+  semanticSearch,
+} from "./search";
 import { setupPage } from "./setup-page";
 import type { Env, IndexJob, RequestContext } from "./types";
 
@@ -46,6 +51,9 @@ async function route(context: RequestContext): Promise<Response> {
     });
   }
   if (path === "/api/setup/status" && method === "GET") return setupStatus(context);
+  if (path === "/api/internal/reranker-migrate-diagnostic" && method === "POST") {
+    return migrateRerankerDiagnostic(context);
+  }
   if (path === "/api/setup" && method === "POST") return initializeInstance(context);
   if (path === "/api/devices/pair" && method === "POST") return pairDevice(context);
 

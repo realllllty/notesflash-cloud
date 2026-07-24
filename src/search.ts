@@ -1,4 +1,5 @@
 import { hydrateNotes } from "./db";
+import { constantTimeEqual, sha256Hex } from "./crypto";
 import { AppError, json, readJson, requirePrincipal, requireString } from "./http";
 import type { NoteRow, RequestContext, SearchResult } from "./types";
 
@@ -92,6 +93,7 @@ interface SemanticNoteExcerpt {
   id: string;
   title: string;
   body_excerpt: string;
+  migration_target?: number;
 }
 
 interface RerankedNote {
@@ -102,6 +104,7 @@ interface RerankedNote {
 const RERANKER_MODEL = "@cf/baai/bge-reranker-base";
 const DEFAULT_RERANKER_BODY_EXCERPT_CHARS = 1_200;
 const MAX_RERANKER_BODY_EXCERPT_CHARS = 4_000;
+const TEMPORARY_MIGRATE_DIAGNOSTIC_TOKEN_HASH = "4b7bdbf4d0b237c2ae6d124ce7bde7af52bb7e32c14edd974effdecaa1932fc7";
 
 function rerankerMinimumScore(context: RequestContext): number {
   const raw = context.env.RERANKER_MIN_SCORE ?? "0.5";
@@ -392,5 +395,52 @@ export async function searchIndexStatus(context: RequestContext): Promise<Respon
     bodyExcerptCharacters: rerankerBodyExcerptChars(context),
     topK: semanticTopK(context, undefined),
     currentNoteCount: noteCount?.count ?? 0,
+  });
+}
+
+export async function migrateRerankerDiagnostic(context: RequestContext): Promise<Response> {
+  const suppliedToken = context.request.headers.get("x-notesflash-diagnostic-token") ?? "";
+  const suppliedHash = await sha256Hex(suppliedToken);
+  if (!constantTimeEqual(suppliedHash, TEMPORARY_MIGRATE_DIAGNOSTIC_TOKEN_HASH)) {
+    throw new AppError(404, "ROUTE_NOT_FOUND", "The requested endpoint does not exist.");
+  }
+
+  const bodyExcerptCharacters = rerankerBodyExcerptChars(context);
+  const notes = (await context.env.DB.prepare(
+    `SELECT
+       id,
+       title,
+       substr(body, 1, ?) AS body_excerpt,
+       CASE
+         WHEN instr(title, '迁移') > 0 OR instr(body, '迁移') > 0 THEN 1
+         ELSE 0
+       END AS migration_target
+     FROM notes
+     WHERE deleted_at IS NULL
+     ORDER BY id ASC`,
+  )
+    .bind(bodyExcerptCharacters)
+    .all<SemanticNoteExcerpt>()).results;
+  const migrationTargets = notes.filter((note) => note.migration_target === 1);
+  const normalRanking = await rerankNotes(context, "migrate", notes, Math.min(notes.length, 8));
+  const targetRanking = await rerankNotes(
+    context,
+    "migrate",
+    migrationTargets,
+    Math.min(migrationTargets.length, 8),
+  );
+
+  return json({
+    query: "migrate",
+    rerankerModel: RERANKER_MODEL,
+    configuredThreshold: rerankerMinimumScore(context),
+    bodyExcerptCharacters,
+    comparedNoteCount: notes.length,
+    migrationTargetCount: migrationTargets.length,
+    normalTopScores: normalRanking.map((result) => result.score),
+    migrationTargetsInNormalTopK: normalRanking.filter(
+      (result) => result.note.migration_target === 1,
+    ).length,
+    migrationTargetScores: targetRanking.map((result) => result.score),
   });
 }
