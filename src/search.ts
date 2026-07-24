@@ -1,5 +1,4 @@
 import { hydrateNotes } from "./db";
-import { constantTimeEqual, sha256Hex } from "./crypto";
 import { AppError, json, readJson, requirePrincipal, requireString } from "./http";
 import type { NoteRow, RequestContext, SearchResult } from "./types";
 
@@ -104,10 +103,9 @@ interface RerankedNote {
 const RERANKER_MODEL = "@cf/baai/bge-reranker-base";
 const DEFAULT_RERANKER_BODY_EXCERPT_CHARS = 1_200;
 const MAX_RERANKER_BODY_EXCERPT_CHARS = 4_000;
-const TEMPORARY_MIGRATE_DIAGNOSTIC_TOKEN_HASH = "4b7bdbf4d0b237c2ae6d124ce7bde7af52bb7e32c14edd974effdecaa1932fc7";
 
 function rerankerMinimumScore(context: RequestContext): number {
-  const raw = context.env.RERANKER_MIN_SCORE ?? "0.5";
+  const raw = context.env.RERANKER_MIN_SCORE ?? "0.05";
   const configured = Number(raw.trim());
   if (raw.trim() === "" || !Number.isFinite(configured)) {
     throw new AppError(
@@ -399,12 +397,7 @@ export async function searchIndexStatus(context: RequestContext): Promise<Respon
 }
 
 export async function migrateRerankerDiagnostic(context: RequestContext): Promise<Response> {
-  const suppliedToken = context.request.headers.get("x-notesflash-diagnostic-token") ?? "";
-  const suppliedHash = await sha256Hex(suppliedToken);
-  if (!constantTimeEqual(suppliedHash, TEMPORARY_MIGRATE_DIAGNOSTIC_TOKEN_HASH)) {
-    throw new AppError(404, "ROUTE_NOT_FOUND", "The requested endpoint does not exist.");
-  }
-
+  requirePrincipal(context);
   const bodyExcerptCharacters = rerankerBodyExcerptChars(context);
   const notes = (await context.env.DB.prepare(
     `SELECT

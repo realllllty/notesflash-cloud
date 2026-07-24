@@ -51,9 +51,6 @@ async function route(context: RequestContext): Promise<Response> {
     });
   }
   if (path === "/api/setup/status" && method === "GET") return setupStatus(context);
-  if (path === "/api/internal/reranker-migrate-diagnostic" && method === "POST") {
-    return migrateRerankerDiagnostic(context);
-  }
   if (path === "/api/setup" && method === "POST") return initializeInstance(context);
   if (path === "/api/devices/pair" && method === "POST") return pairDevice(context);
 
@@ -93,6 +90,9 @@ async function route(context: RequestContext): Promise<Response> {
   if (path === "/api/search/lexical" && method === "GET") return lexicalSearch(context);
   if (path === "/api/search/semantic" && method === "POST") return semanticSearch(context);
   if (path === "/api/search/status" && method === "GET") return searchIndexStatus(context);
+  if (path === "/api/internal/reranker-migrate-diagnostic" && method === "POST") {
+    return migrateRerankerDiagnostic(context);
+  }
 
   if (path === "/api/images" && method === "POST") return uploadImage(context);
   const imageId = pathId(path, /^\/api\/images\/([^/]+)$/);
